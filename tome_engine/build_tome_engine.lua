@@ -24,6 +24,8 @@ project "tome_engine"
 	  "third_party/flecs/distr",
 	  "third_party/spdlog/include",
 	  "third_party/vk-bootstrap/src",
+	  "third_party/vma/include",
+	  "$(VULKAN_SDK)/include"
    }
 
    links {

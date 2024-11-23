@@ -12,7 +12,6 @@ project "vk-bootstrap"
 
    includedirs
    {
-      "src",
 	  "$(VULKAN_SDK)/include"
    }
 

@@ -2,6 +2,7 @@
 
 #include "flecs.h"
 #include "VkBootstrap.h"
+#include "vk_mem_alloc.h"
 #include "spdlog/spdlog.h"
 
 namespace tome {

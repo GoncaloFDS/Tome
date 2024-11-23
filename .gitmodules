@@ -7,3 +7,6 @@
 [submodule "tome_engine/third_party/vk-bootstrap"]
 	path = tome_engine/third_party/vk-bootstrap
 	url = https://github.com/charles-lunarg/vk-bootstrap.git
+[submodule "tome_engine/third_party/vma"]
+	path = tome_engine/third_party/vma
+	url = https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator.git
