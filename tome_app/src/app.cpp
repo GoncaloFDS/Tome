@@ -2,5 +2,11 @@
 
 int main()
 {
-	tome::print_hello_world();
+    Engine engine;
+
+    engine.Init();
+
+    engine.Run();
+
+    engine.Cleanup();
 }

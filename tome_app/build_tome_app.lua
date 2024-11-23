@@ -14,6 +14,15 @@ project "tome_app"
 	  -- Include engine
 	  "../tome_engine/src",
 
+	  -- FIXME: engine includes should be wrapped in engine
+	  "$(VULKAN_SDK)/include",
+	  "../tome_engine/third_party/flecs/distr",
+	  "../tome_engine/third_party/spdlog/include",
+	  "../tome_engine/third_party/vk-bootstrap/src",
+	  "../tome_engine/third_party/vma/include",
+	  "../tome_engine/third_party/glfw/include",
+	  "../tome_engine/third_party/glm",
+
    }
 
    links
