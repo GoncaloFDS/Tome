@@ -1,0 +1,16 @@
+# Directories
+.vs/
+.idea/
+
+binaries/
+
+# Files
+*.vcxproj
+*.vcxproj.user
+*.vcxproj.filters
+*.sln
+*.log
+Makefile
+
+# Exclude
+!third_party/binaries
