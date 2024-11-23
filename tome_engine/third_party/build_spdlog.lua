@@ -1,32 +1,30 @@
-project "tome_app"
-   kind "ConsoleApp"
+project "spdlog"
+   kind "StaticLib"
    language "C++"
    cppdialect "C++20"
    targetdir "binaries/%{cfg.buildcfg}"
    staticruntime "off"
 
-   files { "src/**.h", "src/**.cpp" }
+   defines {
+       "SPDLOG_COMPILED_LIB"
+   }
+
+   files {
+      "spdlog/include/**.h",
+      "spdlog/src/**.cpp",
+   }
 
    includedirs
    {
-      "src",
-
-	  -- Include Core
-	  "../tome_engine/src",
-
+      "spdlog/include",
    }
 
-   links
-   {
-      "tome_engine"
-   }
-
-   targetdir ("../binaries/" .. OutputDir .. "/%{prj.name}")
-   objdir ("../binaries/intermediates/" .. OutputDir .. "/%{prj.name}")
+   targetdir ("../../binaries/" .. OutputDir .. "/%{prj.name}")
+   objdir ("../../binaries/intermediates/" .. OutputDir .. "/%{prj.name}")
 
    filter "system:windows"
        systemversion "latest"
-       defines { "WINDOWS" }
+       defines { }
        buildoptions {
            "/utf-8"
        }

@@ -1,8 +1,9 @@
 #include "engine.h"
 
-#include "flecs.h"
-
 #include <iostream>
+
+#include "flecs.h"
+#include "spdlog/spdlog.h"
 
 namespace tome {
 	void print_hello_world()
@@ -12,20 +13,20 @@ namespace tome {
 		auto e = world.entity();
 		if (e.is_alive())
 		{
-			std::cout << "e is alive\n";
+			spdlog::info("e is alive");
 		}
 		else
 		{
-			std::cout << "fuck\n";
+			spdlog::info("fuck");
 		}
 		e.destruct();
 		if (e.is_alive())
 		{
-			std::cout << "e is alive\n";
+			spdlog::info("e is alive");
 		}
 		else
 		{
-			std::cout << "fuck\n";
+			spdlog::info("fuck");
 		}
 	}
 

@@ -1,8 +1,8 @@
 -- premake5.lua
-workspace "Tome"
+workspace "tome"
    architecture "x64"
    configurations { "Debug", "Release", "Dist" }
-   startproject "Tome"
+   startproject "tome_app"
 
    -- Workspace-wide build options for MSVC
    filter "system:windows"

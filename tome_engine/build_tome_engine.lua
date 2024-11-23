@@ -1,3 +1,8 @@
+group "third_party"
+    include "third_party/build_flecs.lua"
+    include "third_party/build_spdlog.lua"
+group ""
+
 project "tome_engine"
    kind "StaticLib"
    language "C++"
@@ -15,11 +20,13 @@ project "tome_engine"
       "src",
 
 	  -- Include ThirdParty
-	  "third_party/flecs/distr"
+	  "third_party/flecs/distr",
+	  "third_party/spdlog/include"
    }
 
    links {
-      "flecs"
+      "flecs",
+      "spdlog"
    }
 
    targetdir ("../binaries/" .. OutputDir .. "/%{prj.name}")
@@ -28,6 +35,9 @@ project "tome_engine"
    filter "system:windows"
        systemversion "latest"
        defines { }
+       buildoptions {
+           "/utf-8"
+       }
 
    filter "configurations:Debug"
        defines { "DEBUG" }
@@ -46,6 +56,3 @@ project "tome_engine"
        optimize "On"
        symbols "Off"
 
-group "third_party"
-    include "third_party/build_flecs.lua"
-group ""
