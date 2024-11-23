@@ -10,3 +10,9 @@
 [submodule "tome_engine/third_party/vma"]
 	path = tome_engine/third_party/vma
 	url = https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator.git
+[submodule "tome_engine/third_party/glfw"]
+	path = tome_engine/third_party/glfw
+	url = https://github.com/glfw/glfw.git
+[submodule "tome_engine/third_party/glm"]
+	path = tome_engine/third_party/glm
+	url = https://github.com/g-truc/glm.git

@@ -2,6 +2,7 @@ group "third_party"
     include "third_party/build_flecs.lua"
     include "third_party/build_spdlog.lua"
     include "third_party/build_vk-bootstrap.lua"
+    include "third_party/build_glfw.lua"
 group ""
 
 project "tome_engine"
@@ -21,17 +22,20 @@ project "tome_engine"
       "src",
 
 	  -- Include ThirdParty
+	  "$(VULKAN_SDK)/include",
 	  "third_party/flecs/distr",
 	  "third_party/spdlog/include",
 	  "third_party/vk-bootstrap/src",
 	  "third_party/vma/include",
-	  "$(VULKAN_SDK)/include"
+	  "third_party/glfw/include",
+	  "third_party/glm",
    }
 
    links {
       "flecs",
       "spdlog",
       "vk-bootstrap",
+      "glfw",
    }
 
    targetdir ("../binaries/" .. OutputDir .. "/%{prj.name}")
