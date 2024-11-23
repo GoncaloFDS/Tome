@@ -12,9 +12,9 @@ project "tome_engine"
    targetdir "binaries/%{cfg.buildcfg}"
    staticruntime "off"
 
-   files { 
-    "src/**.h", 
-    "src/**.cpp" 
+   files {
+     "src/**.h",
+     "src/**.cpp"
    }
 
    includedirs

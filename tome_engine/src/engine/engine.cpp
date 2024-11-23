@@ -2,6 +2,7 @@
 
 #include "VkBootstrap.h"
 #include "flecs.h"
+#define VMA_IMPLEMENTATION
 #include "vk_mem_alloc.h"
 #define GLFW_INCLUDE_VULKAN
 #include "GLFW/glfw3.h"
@@ -54,12 +55,15 @@ void Engine::Cleanup() {
 
     vkDeviceWaitIdle(_device);
 
-    for (const auto &frame : _frames) {
+    for (auto &frame : _frames) {
         vkDestroyCommandPool(_device, frame.commandPool, nullptr);
         vkDestroyFence(_device, frame.renderFence, nullptr);
         vkDestroySemaphore(_device, frame.renderSemaphore, nullptr);
         vkDestroySemaphore(_device, frame.swapchainSemaphore, nullptr);
+
+        frame.deletionQueue.Flush();
     }
+    _deletionQueue.Flush();
 
     DestroySwapchain();
     vkDestroySurfaceKHR(_instance, _surface, nullptr);
@@ -75,49 +79,53 @@ void Engine::Cleanup() {
 }
 
 void Engine::Draw() {
-    const auto &CurrentFrame = GetCurrentFrame();
+    auto &currentFrame = GetCurrentFrame();
 
-    VK_CHECK(vkWaitForFences(_device, 1, &CurrentFrame.renderFence, true, 1000000000));
-    VK_CHECK(vkResetFences(_device, 1, &CurrentFrame.renderFence));
+    // wait until gpu has finished rendering last frame
+    VK_CHECK(vkWaitForFences(_device, 1, &currentFrame.renderFence, true, 1000000000));
+    currentFrame.deletionQueue.Flush();
+    VK_CHECK(vkResetFences(_device, 1, &currentFrame.renderFence));
 
     uint32_t swapchainImageIndex;
     VK_CHECK(
-        vkAcquireNextImageKHR(_device,_swapchain,1000000000, CurrentFrame.swapchainSemaphore, nullptr, &
+        vkAcquireNextImageKHR(_device,_swapchain,1000000000, currentFrame.swapchainSemaphore, nullptr, &
             swapchainImageIndex));
 
-    const VkCommandBuffer cmd = CurrentFrame.mainCommandBuffer;
+    const VkCommandBuffer cmd = currentFrame.mainCommandBuffer;
 
     VK_CHECK(vkResetCommandBuffer(cmd, 0));
 
     const VkCommandBufferBeginInfo cmdBeginInfo = vk::CommandBufferBeginInfo(
         VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
 
+    _drawExtent.width = _drawImage.imageExtent.width;
+    _drawExtent.height = _drawImage.imageExtent.height;
+
     VK_CHECK(vkBeginCommandBuffer(cmd, &cmdBeginInfo));
 
-    const VkImage swapchainImage = _swapchainImages[swapchainImageIndex];
-    vk::TransitionImage(cmd, swapchainImage, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
+    vk::TransitionImage(cmd, _drawImage.image, VK_IMAGE_LAYOUT_UNDEFINED,VK_IMAGE_LAYOUT_GENERAL);
 
-    const float flash = std::abs(std::sin(_frameNumber / 120.f));
-    const VkClearColorValue clearColorValue = { { flash/3 , flash/2 , flash, 1.0 } };
+    DrawBackground(cmd);
 
-    VkImageSubresourceRange clearRange = vk::ImageSubresourceRange(VK_IMAGE_ASPECT_COLOR_BIT);
+    vk::TransitionImage(cmd, _drawImage.image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+    vk::TransitionImage(cmd, _swapchainImages[swapchainImageIndex], VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
 
-    vkCmdClearColorImage(cmd, swapchainImage, VK_IMAGE_LAYOUT_GENERAL, &clearColorValue, 1, &clearRange);
+    vk::CopyImageToImage(cmd, _drawImage.image,_swapchainImages[swapchainImageIndex], _drawExtent, _swapchainExtent);
 
-    vk::TransitionImage(cmd, swapchainImage, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+    vk::TransitionImage(cmd, _swapchainImages[swapchainImageIndex], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
 
     VK_CHECK(vkEndCommandBuffer(cmd));
 
     VkCommandBufferSubmitInfo cmdSubmitInfo = vk::CommandBufferSubmitInfo(cmd);
     VkSemaphoreSubmitInfo WaitSemaphoreInfo = vk::SemaphoreSubmitInfo(
         VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT_KHR,
-        CurrentFrame.swapchainSemaphore);
+        currentFrame.swapchainSemaphore);
     VkSemaphoreSubmitInfo SignalSemaphoreInfo = vk::SemaphoreSubmitInfo(VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT,
-        CurrentFrame.renderSemaphore);
+        currentFrame.renderSemaphore);
 
     VkSubmitInfo2 submit = vk::SubmitInfo(&cmdSubmitInfo, &SignalSemaphoreInfo, &WaitSemaphoreInfo);
 
-    VK_CHECK(vkQueueSubmit2(_graphicsQueue, 1, &submit,CurrentFrame.renderFence));
+    VK_CHECK(vkQueueSubmit2(_graphicsQueue, 1, &submit,currentFrame.renderFence));
 
     //present
     VkPresentInfoKHR presentInfo = {};
@@ -125,7 +133,7 @@ void Engine::Draw() {
     presentInfo.pNext = nullptr;
     presentInfo.pSwapchains = &_swapchain;
     presentInfo.swapchainCount = 1;
-    presentInfo.pWaitSemaphores = &CurrentFrame.renderSemaphore;
+    presentInfo.pWaitSemaphores = &currentFrame.renderSemaphore;
     presentInfo.waitSemaphoreCount = 1;
     presentInfo.pImageIndices = &swapchainImageIndex;
     VK_CHECK(vkQueuePresentKHR(_graphicsQueue, &presentInfo));
@@ -185,10 +193,61 @@ void Engine::InitVulkan() {
 
     _graphicsQueue = vkbDevice.get_queue(vkb::QueueType::graphics).value();
     _graphicsQueueFamily = vkbDevice.get_queue_index(vkb::QueueType::graphics).value();
+
+    VmaAllocatorCreateInfo vmaAllocatorCreateInfo = {};
+    vmaAllocatorCreateInfo.physicalDevice = _chosenGpu;
+    vmaAllocatorCreateInfo.device = _device;
+    vmaAllocatorCreateInfo.instance = _instance;
+    vmaAllocatorCreateInfo.flags = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT;
+    vmaCreateAllocator(&vmaAllocatorCreateInfo, &_allocator);
+
+    _deletionQueue.PushFunction([&]() {
+        vmaDestroyAllocator(_allocator);
+    });
+
 }
 
 void Engine::InitSwapchain() {
     CreateSwapchain(_windowExtent.width, _windowExtent.height);
+
+    VkExtent3D drawImageExtent = {
+        _windowExtent.width,
+        _windowExtent.height,
+        1
+    };
+
+    _drawImage.imageFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
+    _drawImage.imageExtent = drawImageExtent;
+
+    VkImageUsageFlags drawImageUsages{};
+    drawImageUsages |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+    drawImageUsages |= VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    drawImageUsages |= VK_IMAGE_USAGE_STORAGE_BIT;
+    drawImageUsages |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+
+    VkImageCreateInfo renderImageInfo = vk::ImageCreateInfo(_drawImage.imageFormat, drawImageUsages, drawImageExtent);
+
+    VmaAllocationCreateInfo renderImageAllocinfo = {};
+    renderImageAllocinfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
+    renderImageAllocinfo.requiredFlags = static_cast<VkMemoryPropertyFlags>(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+    vmaCreateImage(_allocator,
+        &renderImageInfo,
+        &renderImageAllocinfo,
+        &_drawImage.image,
+        &_drawImage.allocation,
+        nullptr);
+
+    VkImageViewCreateInfo renderImageViewCreateInfo = vk::ImageviewCreateInfo(_drawImage.imageFormat,
+        _drawImage.image,
+        VK_IMAGE_ASPECT_COLOR_BIT);
+
+    VK_CHECK(vkCreateImageView(_device,&renderImageViewCreateInfo, nullptr, &_drawImage.imageView));
+
+    _deletionQueue.PushFunction([=]() {
+        vkDestroyImageView(_device,_drawImage.imageView, nullptr);
+        vmaDestroyImage(_allocator,_drawImage.image,_drawImage.allocation);
+    });
 }
 
 void Engine::InitCommands() {
@@ -241,4 +300,13 @@ void Engine::DestroySwapchain() {
     for (auto imageView : _swapchainImageViews) {
         vkDestroyImageView(_device, imageView, nullptr);
     }
+}
+
+void Engine::DrawBackground(VkCommandBuffer cmd) {
+    const float flash = std::abs(std::sin(_frameNumber / 120.f));
+    const VkClearColorValue clearColorValue = { { flash / 3, flash / 2, flash, 1.0 } };
+
+    VkImageSubresourceRange clearRange = vk::ImageSubresourceRange(VK_IMAGE_ASPECT_COLOR_BIT);
+
+    vkCmdClearColorImage(cmd, _drawImage.image, VK_IMAGE_LAYOUT_GENERAL, &clearColorValue, 1, &clearRange);
 }
