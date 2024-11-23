@@ -1,6 +1,7 @@
 group "third_party"
     include "third_party/build_flecs.lua"
     include "third_party/build_spdlog.lua"
+    include "third_party/build_vk-bootstrap.lua"
 group ""
 
 project "tome_engine"
@@ -21,12 +22,14 @@ project "tome_engine"
 
 	  -- Include ThirdParty
 	  "third_party/flecs/distr",
-	  "third_party/spdlog/include"
+	  "third_party/spdlog/include",
+	  "third_party/vk-bootstrap/src",
    }
 
    links {
       "flecs",
-      "spdlog"
+      "spdlog",
+      "vk-bootstrap",
    }
 
    targetdir ("../binaries/" .. OutputDir .. "/%{prj.name}")

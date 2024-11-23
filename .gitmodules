@@ -4,3 +4,6 @@
 [submodule "tome_engine/third_party/spdlog"]
 	path = tome_engine/third_party/spdlog
 	url = https://github.com/gabime/spdlog.git
+[submodule "tome_engine/third_party/vk-bootstrap"]
+	path = tome_engine/third_party/vk-bootstrap
+	url = https://github.com/charles-lunarg/vk-bootstrap.git

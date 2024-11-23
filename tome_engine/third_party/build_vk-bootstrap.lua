@@ -1,35 +1,31 @@
-project "tome_app"
-   kind "ConsoleApp"
+project "vk-bootstrap"
+   kind "StaticLib"
    language "C++"
    cppdialect "C++20"
    targetdir "binaries/%{cfg.buildcfg}"
    staticruntime "off"
 
-   files { "src/**.h", "src/**.cpp" }
+   files {
+      "vk-bootstrap/src/**.cpp",
+      "vk-bootstrap/src/**.h",
+   }
 
    includedirs
    {
       "src",
-
-	  -- Include engine
-	  "../tome_engine/src",
-
+	  "$(VULKAN_SDK)/include"
    }
 
-   links
-   {
-      "tome_engine"
+   links {
+      "$(VULKAN_SDK)/lib/vulkan-1.lib"
    }
 
-   targetdir ("../binaries/" .. OutputDir .. "/%{prj.name}")
-   objdir ("../binaries/intermediates/" .. OutputDir .. "/%{prj.name}")
+   targetdir ("../../binaries/" .. OutputDir .. "/%{prj.name}")
+   objdir ("../../binaries/intermediates/" .. OutputDir .. "/%{prj.name}")
 
    filter "system:windows"
        systemversion "latest"
-       defines { "WINDOWS" }
-       buildoptions {
-           "/utf-8"
-       }
+       defines { }
 
    filter "configurations:Debug"
        defines { "DEBUG" }
