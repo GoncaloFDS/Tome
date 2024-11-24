@@ -5,14 +5,19 @@
 #define VMA_IMPLEMENTATION
 #include "vk_mem_alloc.h"
 #define GLFW_INCLUDE_VULKAN
+#include <fstream>
+
 #include "GLFW/glfw3.h"
 #include "rendering/vulkan/vk_images.h"
 #include "rendering/vulkan/vk_initializers.h"
+#include "rendering/vulkan/vk_pipelines.h"
 #include "spdlog/spdlog.h"
+#include "slang/slang.h"
+#include "slang/slang-com-ptr.h"
 
 constexpr bool USE_VALIDATION_LAYERS = true;
 
-Engine *LOADED_ENGINE = nullptr;
+static Engine *LOADED_ENGINE = nullptr;
 
 Engine &Engine::Get() { return *LOADED_ENGINE; }
 
@@ -45,6 +50,11 @@ void Engine::Init() {
     InitCommands();
     InitSyncStructures();
 
+    InitDescriptors();
+
+    InitShaderCompiler();
+    InitPipelines();
+
     _isInitialized = true;
 }
 
@@ -55,14 +65,14 @@ void Engine::Cleanup() {
 
     vkDeviceWaitIdle(_device);
 
-    for (auto &frame : _frames) {
+    for (FrameData &frame : _frames) {
         vkDestroyCommandPool(_device, frame.commandPool, nullptr);
         vkDestroyFence(_device, frame.renderFence, nullptr);
         vkDestroySemaphore(_device, frame.renderSemaphore, nullptr);
         vkDestroySemaphore(_device, frame.swapchainSemaphore, nullptr);
-
         frame.deletionQueue.Flush();
     }
+
     _deletionQueue.Flush();
 
     DestroySwapchain();
@@ -103,16 +113,22 @@ void Engine::Draw() {
 
     VK_CHECK(vkBeginCommandBuffer(cmd, &cmdBeginInfo));
 
-    vk::TransitionImage(cmd, _drawImage.image, VK_IMAGE_LAYOUT_UNDEFINED,VK_IMAGE_LAYOUT_GENERAL);
+    vk::TransitionImage(cmd, _drawImage.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
 
     DrawBackground(cmd);
 
     vk::TransitionImage(cmd, _drawImage.image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
-    vk::TransitionImage(cmd, _swapchainImages[swapchainImageIndex], VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+    vk::TransitionImage(cmd,
+        _swapchainImages[swapchainImageIndex],
+        VK_IMAGE_LAYOUT_UNDEFINED,
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
 
-    vk::CopyImageToImage(cmd, _drawImage.image,_swapchainImages[swapchainImageIndex], _drawExtent, _swapchainExtent);
+    vk::CopyImageToImage(cmd, _drawImage.image, _swapchainImages[swapchainImageIndex], _drawExtent, _swapchainExtent);
 
-    vk::TransitionImage(cmd, _swapchainImages[swapchainImageIndex], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+    vk::TransitionImage(cmd,
+        _swapchainImages[swapchainImageIndex],
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
 
     VK_CHECK(vkEndCommandBuffer(cmd));
 
@@ -202,6 +218,7 @@ void Engine::InitVulkan() {
     vmaCreateAllocator(&vmaAllocatorCreateInfo, &_allocator);
 
     _deletionQueue.PushFunction([&]() {
+        spdlog::info("Deleting allocator");
         vmaDestroyAllocator(_allocator);
     });
 
@@ -244,9 +261,10 @@ void Engine::InitSwapchain() {
 
     VK_CHECK(vkCreateImageView(_device,&renderImageViewCreateInfo, nullptr, &_drawImage.imageView));
 
-    _deletionQueue.PushFunction([=]() {
-        vkDestroyImageView(_device,_drawImage.imageView, nullptr);
-        vmaDestroyImage(_allocator,_drawImage.image,_drawImage.allocation);
+    _deletionQueue.PushFunction([&]() {
+        spdlog::info("Deleting image");
+        vkDestroyImageView(_device, _drawImage.imageView, nullptr);
+        vmaDestroyImage(_allocator, _drawImage.image, _drawImage.allocation);
     });
 }
 
@@ -273,6 +291,114 @@ void Engine::InitSyncStructures() {
         VK_CHECK(vkCreateSemaphore(_device, &semaphoreCreateInfo, nullptr, &frame.renderSemaphore));
     }
 
+}
+
+void Engine::InitDescriptors() {
+    std::vector<DescriptorAllocator::PoolSizeRatio> poolSizeRatios = {
+        { .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, .ratio = 1 }
+    };
+
+    _globalDescriptorAllocator.InitPool(_device, 10, poolSizeRatios);
+
+    {
+        DescriptorLayoutBuilder descriptorLayoutBuilder;
+        descriptorLayoutBuilder.AddBinding(0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE);
+        _drawImageDescriptorSetLayout = descriptorLayoutBuilder.Build(_device, VK_SHADER_STAGE_COMPUTE_BIT);
+    }
+
+    _drawImageDescriptorSet = _globalDescriptorAllocator.Allocate(_device, _drawImageDescriptorSetLayout);
+
+    VkDescriptorImageInfo descriptorImageInfo = {};
+    descriptorImageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+    descriptorImageInfo.imageView = _drawImage.imageView;
+
+    VkWriteDescriptorSet drawImageWrite = {};
+    drawImageWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    drawImageWrite.pNext = nullptr;
+    drawImageWrite.dstBinding = 0;
+    drawImageWrite.dstSet = _drawImageDescriptorSet;
+    drawImageWrite.descriptorCount = 1;
+    drawImageWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+    drawImageWrite.pImageInfo = &descriptorImageInfo;
+
+    vkUpdateDescriptorSets(_device, 1, &drawImageWrite, 0, nullptr);
+
+    _deletionQueue.PushFunction([&]() {
+        _globalDescriptorAllocator.DestroyPool(_device);
+        vkDestroyDescriptorSetLayout(_device, _drawImageDescriptorSetLayout, nullptr);
+    });
+
+}
+
+void Engine::InitShaderCompiler() {
+    using namespace slang;
+
+    createGlobalSession(_slangGlobalSession.writeRef());
+
+    SessionDesc sessionDesc = {};
+
+    TargetDesc targetDesc = {};
+    targetDesc.format = SLANG_SPIRV;
+    targetDesc.profile = _slangGlobalSession->findProfile("spirv_1_5");
+    targetDesc.flags = 0;
+
+    std::vector searchPaths = { "shaders/", "../tome_engine/shaders/" };
+    sessionDesc.searchPaths = searchPaths.data();
+    sessionDesc.searchPathCount = static_cast<uint32_t>(searchPaths.size());
+
+    sessionDesc.targets = &targetDesc;
+    sessionDesc.targetCount = 1;
+
+    std::vector<CompilerOptionEntry> compilerOptions;
+    compilerOptions.push_back({ .name = CompilerOptionName::EmitSpirvDirectly,
+                                .value = {
+                                    .kind = CompilerOptionValueKind::Int, .intValue0 = 1, .intValue1 = 0,
+                                    .stringValue0 = nullptr,
+                                    .stringValue1 = nullptr } });
+    sessionDesc.compilerOptionEntries = compilerOptions.data();
+    sessionDesc.compilerOptionEntryCount = static_cast<uint32_t>(compilerOptions.size());
+
+    _slangGlobalSession->createSession(sessionDesc, _slangSession.writeRef());
+}
+
+void Engine::InitPipelines() {
+    InitBackgroundPipelines();
+}
+
+void Engine::InitBackgroundPipelines() {
+    VkPipelineLayoutCreateInfo computeLayout{};
+    computeLayout.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    computeLayout.pNext = nullptr;
+    computeLayout.pSetLayouts = &_drawImageDescriptorSetLayout;
+    computeLayout.setLayoutCount =1;
+
+    VK_CHECK(vkCreatePipelineLayout(_device, &computeLayout, nullptr, &_gradientPipelineLayout));
+
+    auto computeDrawShader = vk::LoadShaderModule("gradient.slang", _device, _slangSession);
+    if (!computeDrawShader.has_value()) {
+        return;
+    }
+
+    VkPipelineShaderStageCreateInfo stageCreateInfo = {};
+    stageCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    stageCreateInfo.pNext = nullptr;
+    stageCreateInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+    stageCreateInfo.module = computeDrawShader.value();
+    stageCreateInfo.pName = "main";
+
+    VkComputePipelineCreateInfo computePipelineCreateInfo{};
+    computePipelineCreateInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+    computePipelineCreateInfo.pNext = nullptr;
+    computePipelineCreateInfo.layout = _gradientPipelineLayout;
+    computePipelineCreateInfo.stage = stageCreateInfo;
+
+    VK_CHECK(vkCreateComputePipelines(_device, VK_NULL_HANDLE, 1, &computePipelineCreateInfo, nullptr, &_gradientPipeline));
+    vkDestroyShaderModule(_device, computeDrawShader.value(), nullptr);
+
+    _deletionQueue.PushFunction([&]() {
+        vkDestroyPipelineLayout(_device, _gradientPipelineLayout, nullptr);
+        vkDestroyPipeline(_device, _gradientPipeline, nullptr);
+    });
 }
 
 void Engine::CreateSwapchain(uint32_t width, uint32_t height) {
@@ -303,10 +429,7 @@ void Engine::DestroySwapchain() {
 }
 
 void Engine::DrawBackground(VkCommandBuffer cmd) {
-    const float flash = std::abs(std::sin(_frameNumber / 120.f));
-    const VkClearColorValue clearColorValue = { { flash / 3, flash / 2, flash, 1.0 } };
-
-    VkImageSubresourceRange clearRange = vk::ImageSubresourceRange(VK_IMAGE_ASPECT_COLOR_BIT);
-
-    vkCmdClearColorImage(cmd, _drawImage.image, VK_IMAGE_LAYOUT_GENERAL, &clearColorValue, 1, &clearRange);
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, _gradientPipeline);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, _gradientPipelineLayout, 0, 1, &_drawImageDescriptorSet, 0, nullptr);
+    vkCmdDispatch(cmd, std::ceil(_drawExtent.width/16.0), std::ceil(_drawExtent.height / 16.0) , 1);
 }

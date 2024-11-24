@@ -14,3 +14,4 @@ Makefile
 
 # Exclude
 !third_party/binaries
+*.DotSettings.user

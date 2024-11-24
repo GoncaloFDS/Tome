@@ -1,6 +1,10 @@
 #pragma once
 
+#include "rendering/vulkan/vk_descriptors.h"
 #include "rendering/vulkan/vk_types.h"
+
+#include "slang/slang.h"
+#include "slang/slang-com-ptr.h"
 
 struct DeletionQueue {
     std::deque<std::function<void()>> deletors;
@@ -10,8 +14,8 @@ struct DeletionQueue {
     }
 
     void Flush() {
-        for (const std::function<void()>& deletor : deletors ) {
-            deletor();
+        for (auto it = deletors.rbegin(); it!= deletors.rend(); it++) {
+            (*it)();
         }
         deletors.clear();
     }
@@ -72,10 +76,24 @@ private:
     AllocatedImage _drawImage = {};
     VkExtent2D _drawExtent = {};
 
+    DescriptorAllocator _globalDescriptorAllocator = {};
+    VkDescriptorSet _drawImageDescriptorSet = nullptr;
+    VkDescriptorSetLayout _drawImageDescriptorSetLayout = nullptr;
+
+    VkPipeline _gradientPipeline = nullptr;
+    VkPipelineLayout _gradientPipelineLayout = nullptr;
+
+    Slang::ComPtr<slang::IGlobalSession> _slangGlobalSession;
+    Slang::ComPtr<slang::ISession> _slangSession;
+
     void InitVulkan();
     void InitSwapchain();
     void InitCommands();
     void InitSyncStructures();
+    void InitDescriptors();
+    void InitShaderCompiler();
+    void InitPipelines();
+    void InitBackgroundPipelines();
 
     void CreateSwapchain(uint32_t width, uint32_t height);
     void DestroySwapchain();

@@ -36,6 +36,7 @@ project "tome_engine"
       "spdlog",
       "vk-bootstrap",
       "glfw",
+      "$(VULKAN_SDK)/lib/slang"
    }
 
    targetdir ("../binaries/" .. OutputDir .. "/%{prj.name}")
